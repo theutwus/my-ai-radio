@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101b2b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="AI Radio">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <title>My AI Radio | Phase 0</title>
+</head>
+<body>
+<main class="shell">
+  <header><div class="logo">◉ <span>MY AI RADIO</span></div><span class="phase">PHASE 0 · 音声再生テスト</span></header>
+  <section class="hero">
+    <p class="eyebrow">PLAYER TEST</p><h1>音声の連続再生を<br>iPhoneで確かめる。</h1>
+    <p>本番のAI放送ではなく、音声切り替え・ロック画面・バックグラウンド再生を確認する試作版です。</p>
+    <div class="indicators"><span id="net">接続確認中</span><span id="mode">ブラウザ版</span><span id="state">待機中</span></div>
+  </section>
+  <section class="panel" aria-label="再生操作">
+    <div class="now"><div class="cover">♫</div><div><div class="overline">NOW PLAYING</div><h2 id="track-title">まだ再生していません</h2><p id="track-kind">サンプル3本を順番に再生します</p></div></div>
+    <audio id="player" preload="auto" playsinline></audio>
+    <div class="progress"><span id="elapsed">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="再生位置"><span id="duration">0:00</span></div>
+    <div class="controls"><button id="prev" type="button" aria-label="前の音源">◀◀</button><button class="primary" id="toggle" type="button">▶ 再生</button><button id="next" type="button" aria-label="次の音源">▶▶</button></div>
+    <div class="secondary-controls"><button id="sample" class="chip active" type="button">テスト音源</button><button id="local" class="chip" type="button">手持ち音源を選択</button><input id="files" type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg" hidden></div>
+    <p class="hint">手持ち音源はその場で読み込むだけで、サーバーにアップロードしません。ページを閉じると選択情報は消えます。</p>
+  </section>
+  <section class="panel"><div class="section-title"><h3>再生キュー</h3><span id="queue-count">3項目</span></div><ol id="queue"></ol></section>
+  <section class="panel"><div class="section-title"><h3>動作ログ</h3><button id="clear" type="button" class="text-btn">ログ消去</button></div><p class="hint">画面OFF中の切替が失敗しても、画面を戻した後にログや再生位置を確認できます。</p><div id="log" role="log" aria-live="polite"></div><button type="button" class="text-btn" id="copy">ログをコピー</button></section>
+  <section class="panel small"><h3>現在の開発範囲</h3><p><b>実装済み：</b>プレイリスト、同一audio要素による切替、Media Session、簡易ログ、サンプル音源、PWAの基本ファイル。</p><p><b>未接続：</b>Googleドライブ認証、GAS定時制作、Gemini音声、MC・番組生成、実際のGoogleドライブ音楽再生。</p></section>
+  <footer>My AI Radio · Prototype 0.1.0</footer>
+</main>
+<script src="app.js" defer></script>
+</body></html>
