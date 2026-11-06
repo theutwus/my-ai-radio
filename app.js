@@ -25,19 +25,14 @@
   el('files').addEventListener('change',e=>{const files=Array.from(e.target.files||[]).filter(f=>f.type.startsWith('audio/')||/\.(mp3|aac|m4a|wav|ogg)$/i.test(f.name));if(!files.length){log('音声ファイルが選択されませんでした');return;}audio.pause();playingIntent=false;releaseLocal();queue=files.map(f=>{const url=URL.createObjectURL(f);localUrls.push(url);return{title:f.name,kind:'端末から選択した音源',url};});el('local').classList.add('active');el('sample').classList.remove('active');load(0);log(`ローカル音源 ${queue.length}件を読み込み`);e.target.value='';});
   audio.addEventListener('ended',()=>{log(`終了イベント: ${queue[index]?.title} [${document.visibilityState}]`);if(playingIntent)void next();});
   audio.addEventListener('timeupdate',()=>{el('elapsed').textContent=fmt(audio.currentTime);el('duration').textContent=fmt(audio.duration);if(Number.isFinite(audio.duration)&&audio.duration>0)el('seek').value=String(Math.floor(audio.currentTime/audio.duration*1000));if(Math.floor(audio.currentTime)!==lastProgress){lastProgress=Math.floor(audio.currentTime);if(lastProgress%5===0)log(`再生位置 ${fmt(audio.currentTime)} [${document.visibilityState}]`);}});
-  audio.addEventListener('play',()=>{playingIntent=true;log(`再生イベント [${document.visibilityState}]`);render();});audio.addEventListener('pause',()=>{log(`停止イベント [${document.visibilityState}]`);render();});audio.addEventListener('error',()=>{const code=audio.error?.code||'?';log(`再生エラー code=${code} URL=${queue[index]?.url}`);});
+  audio.addEventListener('play',render);audio.addEventListener('pause',render);audio.addEventListener('error',()=>{const code=audio.error?.code||'?';log(`再生エラー code=${code} URL=${queue[index]?.url}`);});
   el('seek').addEventListener('change',e=>{if(Number.isFinite(audio.duration))audio.currentTime=Number(e.target.value)/1000*audio.duration;});
   el('clear').addEventListener('click',()=>{lines.length=0;el('log').textContent='';});
   el('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(lines.join('\n'));log('ログをコピーしました');}catch{log('クリップボードにコピーできませんでした');}});
   document.addEventListener('visibilitychange',()=>log(`画面状態: ${document.visibilityState}`));
   window.addEventListener('online',()=>{el('net').textContent='オンライン';log('オンラインへ復帰');});window.addEventListener('offline',()=>{el('net').textContent='オフライン';log('オフラインへ移行');});
-  // iOSのロック画面再生・停止はSafariの標準操作に任せて挙動を切り分ける。
-  if ('mediaSession' in navigator) {
-    const tryAction=(name,fn)=>{try{navigator.mediaSession.setActionHandler(name,fn);}catch{}};
-    tryAction('previoustrack',()=>{void startAt(Math.max(0,index-1),true);});
-    tryAction('nexttrack',()=>{playingIntent=true;void next();});
-  }
+  if('mediaSession' in navigator){const tryAction=(name,fn)=>{try{navigator.mediaSession.setActionHandler(name,fn);}catch{}};tryAction('play',()=>{void play();});tryAction('pause',()=>{playingIntent=false;audio.pause();render();});tryAction('previoustrack',()=>{void startAt(Math.max(0,index-1),true);});tryAction('nexttrack',()=>{playingIntent=true;void next();});}
   el('net').textContent=navigator.onLine?'オンライン':'オフライン';el('mode').textContent=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone?'ホーム画面版':'ブラウザ版';
-  load(0);log('Prototype 0.1.1 起動（ロック画面: 標準制御）');
+  load(0);log('Prototype 0.1.2 起動（0.1.0の再生制御へ復帰）');
   if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('./sw.js').then(()=>log('Service Worker登録')).catch(e=>log(`SW登録不可: ${e.message}`));
 })();
