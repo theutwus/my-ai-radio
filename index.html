@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#101b2b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -10,28 +10,46 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
-  <title>My AI Radio | Phase 0</title>
+  <title>My AI Radio | Prototype 0.2.0</title>
 </head>
 <body>
 <main class="shell">
-  <header><div class="logo">◉ <span>MY AI RADIO</span></div><span class="phase">PHASE 0 · 音声再生テスト</span></header>
-  <section class="hero">
-    <p class="eyebrow">PLAYER TEST</p><h1>音声の連続再生を<br>iPhoneで確かめる。</h1>
-    <p>本番のAI放送ではなく、音声切り替え・ロック画面・バックグラウンド再生を確認する試作版です。</p>
-    <div class="indicators"><span id="net">接続確認中</span><span id="mode">ブラウザ版</span><span id="state">待機中</span></div>
-  </section>
-  <section class="panel" aria-label="再生操作">
-    <div class="now"><div class="cover">♫</div><div><div class="overline">NOW PLAYING</div><h2 id="track-title">まだ再生していません</h2><p id="track-kind">サンプル3本を順番に再生します</p></div></div>
-    <audio id="player" preload="auto" playsinline></audio>
-    <div class="progress"><span id="elapsed">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="再生位置"><span id="duration">0:00</span></div>
-    <div class="controls"><button id="prev" type="button" aria-label="前の音源">◀◀</button><button class="primary" id="toggle" type="button">▶ 再生</button><button id="next" type="button" aria-label="次の音源">▶▶</button></div>
-    <div class="secondary-controls"><button id="sample" class="chip active" type="button">テスト音源</button><button id="local" class="chip" type="button">手持ち音源を選択</button><input id="files" type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg" hidden></div>
-    <p class="hint">手持ち音源はその場で読み込むだけで、サーバーにアップロードしません。ページを閉じると選択情報は消えます。</p>
-  </section>
-  <section class="panel"><div class="section-title"><h3>再生キュー</h3><span id="queue-count">3項目</span></div><ol id="queue"></ol></section>
-  <section class="panel"><div class="section-title"><h3>動作ログ</h3><button id="clear" type="button" class="text-btn">ログ消去</button></div><p class="hint">画面OFF中の切替が失敗しても、画面を戻した後にログや再生位置を確認できます。</p><div id="log" role="log" aria-live="polite"></div><button type="button" class="text-btn" id="copy">ログをコピー</button></section>
-  <section class="panel small"><h3>現在の開発範囲</h3><p><b>実装済み：</b>プレイリスト、同一audio要素による切替、Media Session、簡易ログ、サンプル音源、PWAの基本ファイル。</p><p><b>未接続：</b>Googleドライブ認証、GAS定時制作、Gemini音声、MC・番組生成、実際のGoogleドライブ音楽再生。</p></section>
-  <footer>My AI Radio · Prototype 0.1.2</footer>
+<header><div class="logo">◉ <span>MY AI RADIO</span></div><span class="phase">PROTOTYPE 0.2.0</span></header>
+<section class="hero">
+  <p class="eyebrow">DRIVE CONNECTION TEST</p>
+  <h1>Googleドライブの曲を<br>iPhoneで聴く。</h1>
+  <p>0.1.2で成功した音声プレーヤーを基に、非公開フォルダの曲一覧取得と再生を検証するバージョンです。</p>
+  <div class="indicators"><span id="net">接続確認中</span><span id="mode">ブラウザ版</span><span id="state">待機中</span></div>
+</section>
+<section class="panel" aria-label="Google Drive接続">
+  <div class="section-title"><h3>Googleドライブ接続</h3><span id="drive-status">未接続</span></div>
+  <label class="field-label" for="client-id">Google OAuth クライアントID（Webアプリ用）</label>
+  <input id="client-id" class="field" type="text" inputmode="text" autocomplete="off" placeholder="123456789-xxxx.apps.googleusercontent.com" spellcheck="false">
+  <div class="field-actions"><button id="connect" type="button" class="action">Googleに接続</button><button id="disconnect" type="button" class="action ghost" disabled>切断</button></div>
+  <p class="hint">クライアントIDは公開してよい識別子です。アクセストークンはメモリ内だけに保持します。<strong>読み取り専用ですが、認可範囲はDrive全体</strong>です（フォルダ限定ではありません）。</p>
+  <label class="field-label" for="folder-id">音楽フォルダのURL またはID（任意）</label>
+  <input id="folder-id" class="field" type="text" placeholder="空欄なら AI-Radio-Music を名前で検索" spellcheck="false">
+  <div class="field-actions"><button id="scan-drive" type="button" class="action" disabled>楽曲一覧を取得</button></div>
+  <div id="folder-chooser" class="folder-chooser" hidden><label for="folder-select" class="field-label">同名フォルダが複数あります。選択してください</label><select id="folder-select" class="field"></select><button type="button" class="action" id="confirm-folder">このフォルダを使う</button></div>
+  <p id="drive-message" class="note" role="status">Google Cloudの設定後に接続できます。設定手順は同梱READMEを参照してください。</p>
+  <p class="hint">この試作版の認証は手動です。曲を公共公開する必要はありません。Googleの認証画面で拒否される場合はテストユーザーの登録を確認してください。</p>
+</section>
+<section class="panel" aria-label="再生操作">
+  <div class="now"><div class="cover">♫</div><div><div class="overline">NOW PLAYING</div><h2 id="track-title">まだ再生していません</h2><p id="track-kind">音源を選択してください</p></div></div>
+  <audio id="player" preload="auto" playsinline></audio>
+  <div class="progress"><span id="elapsed">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="再生位置"><span id="duration">0:00</span></div>
+  <div class="controls"><button id="prev" type="button" aria-label="前の音源">◀◀</button><button class="primary" id="toggle" type="button">▶ 再生</button><button id="next" type="button" aria-label="次の音源">▶▶</button></div>
+  <div class="secondary-controls"><button id="sample" class="chip active" type="button">テスト音源</button><button id="local" class="chip" type="button">端末音源</button><button id="drive-mode" class="chip" type="button" disabled>Googleドライブ</button><input id="files" type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" hidden></div>
+  <div class="stream-choice"><label for="playback-mode">Driveの再生方式：</label><select id="playback-mode"><option value="compatible">互換モード（曲を受信してから再生）</option><option value="range">ストリーミング実験モード（Range）</option></select></div>
+  <p class="hint">互換モードは曲全体を受信してから再生します（通信量はファイルサイズ分）。25MB以下の次曲を先読みします。画面OFF時の曲間自動切替はまだ実機未確認です。実験モードはService Workerで認証付き部分取得を試しますが、iPhone画面OFF時の動作は未検証です。</p>
+</section>
+<section class="panel"><div class="section-title"><h3>再生キュー</h3><span id="queue-count">3項目</span></div><label for="filter" class="field-label">曲名・フォルダ名で検索</label><input id="filter" class="field" type="search" placeholder="曲名・アーティスト名"><p id="queue-summary" class="queue-limit"></p><ol id="queue"></ol><p id="library-info" class="hint">Googleドライブの楽曲一覧はまだ取得していません。</p></section>
+<section class="panel"><div class="section-title"><h3>動作ログ</h3><button id="clear" type="button" class="text-btn">ログ消去</button></div><p class="hint">アクセストークンはログに記録しません（曲名とフォルダ名は表示します）。画面OFF中の切り替わりも確認してください。</p><div id="log" role="log" aria-live="polite"></div><button type="button" class="text-btn" id="copy">ログをコピー</button></section>
+<section class="panel small"><h3>今回の開発範囲</h3><p><b>実装済み：</b>サンプル連続再生、Media Session、Google OAuth、フォルダ再帰探索、楽曲一覧、非公開Drive音源の互換再生、認証付きRange実験モード。</p><p><b>今後：</b>画面OFFでのDrive連続再生の安定化、差分同期、タグ解析、GAS定時制作、Gemini連携。</p></section>
+<footer>My AI Radio · Prototype 0.2.0</footer>
 </main>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="drive.js" defer></script>
 <script src="app.js" defer></script>
-</body></html>
+</body>
+</html>
