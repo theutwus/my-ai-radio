@@ -26,6 +26,9 @@
   let inFlight=new Map();
   let cacheEpoch=0;
   let lastPlaybackMode='compatible';
+  let rangeFallbackUsed=false;
+  let rangeFallbackScheduled=false;
+  let rangeDiagnostics=[];
 
   function log(s){
     const ts=new Date().toLocaleTimeString('ja-JP',{hour12:false});
@@ -78,7 +81,7 @@
   function updateMedia(){
     if(!('mediaSession' in navigator)||!queue[index])return;
     try{
-      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.2.0'});
+      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.2.1'});
       navigator.mediaSession.playbackState=audio.paused?'paused':'playing';
     }catch(e){log(`MediaSession: ${e.message}`);}
   }
@@ -97,7 +100,7 @@
     el('seek').value='0';el('elapsed').textContent='0:00';el('duration').textContent='0:00';
   }
   function changeQueue(items,source){
-    serial++;playingIntent=false;loading=false;
+    serial++;playingIntent=false;loading=false;rangeFallbackUsed=false;rangeFallbackScheduled=false;
     resetAudio();releaseCache();
     queue=items.map(item=>({...item}));index=0;
     el('filter').value='';setActive(source);render();
@@ -163,6 +166,28 @@
     }
     return ensureBlob(track);
   }
+  function isRangeTrack(){
+    return activeSource==='drive' && el('playback-mode').value==='range' && queue[index]?.source==='drive';
+  }
+  function requestRangeFallback(reason){
+    if(!isRangeTrack() || rangeFallbackUsed || rangeFallbackScheduled)return false;
+    rangeFallbackScheduled=true;
+    const targetIndex=index;
+    log(`Range方式の再生失敗: ${reason}。互換方式へ自動切替します。`);
+    // The fallback uses the proven compatible playback path; no queue reset, so
+    // the current track is retried instead of jumping to the start of the library.
+    queueMicrotask(()=>{
+      if(!isRangeTrack() || targetIndex!==index){rangeFallbackScheduled=false;return;}
+      rangeFallbackUsed=true;
+      rangeFallbackScheduled=false;
+      el('playback-mode').value='compatible';
+      lastPlaybackMode='compatible';
+      setMessage('Range方式が使用できなかったため互換方式に切り替えました。曲全体を取得して再生します。');
+      log(`互換方式で同じ曲を再試行: ${queue[index]?.title}`);
+      void activate(index,true);
+    });
+    return true;
+  }
   async function beginPlay(){
     if(!queue.length)return;
     playingIntent=true;
@@ -170,12 +195,16 @@
       if('audioSession' in navigator)navigator.audioSession.type='playback';
       await audio.play();
       log(`再生開始: ${queue[index].title}`);
-    }catch(e){playingIntent=false;log(`再生できません: ${e.name}: ${e.message}`);}
+    }catch(e){
+      playingIntent=false;log(`再生できません: ${e.name}: ${e.message}`);
+      requestRangeFallback(`${e.name}: ${e.message}`);
+    }
     render();
   }
   async function activate(nextIndex,autoplay){
     if(nextIndex<0||nextIndex>=queue.length){playingIntent=false;audio.pause();loading=false;render();return;}
     const requestNumber=++serial;
+    rangeFallbackUsed=false;
     playingIntent=Boolean(autoplay);
     loading=true;
     resetAudio();index=nextIndex;
@@ -210,6 +239,7 @@
       if(serial!==requestNumber)return;
       loading=false;playingIntent=false;render();
       log(`音源取得失敗: ${e.message}`);
+      if(requestRangeFallback(e.message))return;
       if(activeSource==='drive')setMessage(`再生エラー：${e.message}。画面OFF中の次曲取得に失敗した場合は画面ONで再生を押してください。`,true);
     }
   }
@@ -326,7 +356,11 @@
     if(Math.floor(audio.currentTime)!==lastProgress){lastProgress=Math.floor(audio.currentTime);if(lastProgress%10===0)log(`再生位置 ${fmt(audio.currentTime)} [${document.visibilityState}]`);}
   });
   audio.addEventListener('play',render);audio.addEventListener('pause',render);
-  audio.addEventListener('error',()=>{const code=audio.error?.code||'?';log(`再生エラー code=${code} (モード: ${el('playback-mode').value})`);});
+  audio.addEventListener('error',()=>{
+    const code=audio.error?.code||'?';
+    log(`再生エラー code=${code} (モード: ${el('playback-mode').value})`);
+    if(code===4 || code===2 || code===3)requestRangeFallback(`MediaError code=${code}`);
+  });
   el('seek').addEventListener('change',e=>{if(Number.isFinite(audio.duration))audio.currentTime=Number(e.target.value)/1000*audio.duration;});
   el('clear').addEventListener('click',()=>{lines.length=0;el('log').textContent='';});
   el('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(lines.join('\n'));log('ログをコピーしました');}catch{log('ログコピー不可。ブラウザのコピー権限を確認してください。');}});
@@ -339,6 +373,7 @@
     const value=el('playback-mode').value;
     if(value===lastPlaybackMode)return;
     lastPlaybackMode=value;
+    rangeFallbackUsed=false;rangeFallbackScheduled=false;
     log(`再生方式を変更: ${value}`);
     if(activeSource==='drive'){changeQueue(driveTracks,'drive');setMessage('再生方式を変更しました。先頭の曲から再生してください。');}
   });
@@ -358,7 +393,17 @@
   el('folder-id').value=safeGetStorage(savedFolderKey);
   el('queue').replaceChildren();
   render();
-  log('Prototype 0.2.0 起動（Google Drive連携）');
+  log('Prototype 0.2.1 起動（Range診断・自動フォールバック）');
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.addEventListener('message',event=>{
+      if(event.data?.type!=='DRIVE_RANGE_DIAGNOSTIC')return;
+      const d=event.data;
+      const message=`Range診断: ${d.stage} status=${d.status||'?'} requestRange=${d.requestRange||'なし'} responseRange=${d.responseRange||'なし'} contentType=${d.contentType||'不明'} ${d.error||''}`;
+      rangeDiagnostics.push(message);
+      if(rangeDiagnostics.length>25)rangeDiagnostics.shift();
+      log(message);
+    });
+  }
   if('serviceWorker' in navigator&&location.protocol==='https:'){
     navigator.serviceWorker.register('./sw.js').then(()=>{
       log('Service Worker登録');
