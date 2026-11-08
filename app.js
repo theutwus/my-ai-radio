@@ -3,6 +3,9 @@
   const el = id => document.getElementById(id);
   const audio = el('player');
   const drive = window.RadioDrive;
+  const metadata = window.RadioMetadata;
+  let musicRecords = new Map();
+  let metaJobs = new Set();
   const samples = [
     {title:'オープニング（テスト）',kind:'AIトーク相当・短いテスト信号',url:'audio/01-opening.wav',source:'sample'},
     {title:'楽曲枠（テスト）',kind:'音楽相当・短いテスト信号',url:'audio/02-music.wav',source:'sample'},
@@ -25,6 +28,7 @@
   let cached=new Map();
   let inFlight=new Map();
   let cacheEpoch=0;
+  let prefetchLogged=new Set();
   let lastPlaybackMode='compatible';
   let rangeFallbackUsed=false;
   let rangeFallbackScheduled=false;
@@ -68,7 +72,10 @@
       shown++;
       const li=document.createElement('li');if(i===index)li.className='current';
       const num=document.createElement('span');num.className='number';num.textContent=String(i+1);
-      const name=document.createElement('span');name.className='track-name';name.textContent=x.title;
+      const name=document.createElement('span');name.className='track-name';
+      const m=x.source==='drive'?musicRecords.get(x.id):null;
+      name.textContent=m?.title || x.title;
+      if(m?.artist){const artist=document.createElement('small');artist.textContent=m.artist+(m.album?' · '+m.album:'');name.append(artist);}
       if(x.path){const small=document.createElement('small');small.textContent=x.path;name.append(small);}
       const btn=document.createElement('button');btn.type='button';btn.textContent='この曲から';
       btn.addEventListener('click',()=>{playingIntent=true;void activate(i,true);});
@@ -81,7 +88,7 @@
   function updateMedia(){
     if(!('mediaSession' in navigator)||!queue[index])return;
     try{
-      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.2.1'});
+      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.3.0'});
       navigator.mediaSession.playbackState=audio.paused?'paused':'playing';
     }catch(e){log(`MediaSession: ${e.message}`);}
   }
@@ -89,7 +96,7 @@
   function releaseCache(){
     // Cancel downloads before releasing object URLs. A finished download from a
     // previous queue must never repopulate the next queue's private media cache.
-    cacheEpoch++;
+    cacheEpoch++;prefetchLogged.clear();
     for(const job of inFlight.values())job.abort.abort();
     inFlight.clear();
     for(const url of cached.values())URL.revokeObjectURL(url);
@@ -131,12 +138,39 @@
       if(epoch!==cacheEpoch)throw new Error('別の音源一覧へ切り替わったため取得を中断しました。');
       const url=URL.createObjectURL(blob);
       cached.set(track.id,url);
+      // Reuse bytes already downloaded for playback. No separate 107-file crawl.
+      void analyzeTrack(track,blob);
       return url;
     })().finally(()=>{
       if(inFlight.get(track.id)?.promise===promise)inFlight.delete(track.id);
     });
     inFlight.set(track.id,{promise,abort});
     return promise;
+  }
+  async function loadMusicRecords(){
+    try{const entries=await metadata.getAll();musicRecords=new Map(entries.map(x=>[x.id,x]));renderMusicInfo();render();}
+    catch(e){log(`楽曲タグDBは利用できません: ${e.message}`);}
+  }
+  function renderMusicInfo(){
+    const analyzed=driveTracks.filter(t=>musicRecords.has(t.id)).length;
+    el('music-meta-status').textContent=`登録 ${driveTracks.length}曲 / タグ情報取得済み ${analyzed}曲（この端末）`;
+  }
+  async function analyzeTrack(track,blob){
+    if(metaJobs.has(track.id))return;
+    const before=musicRecords.get(track.id);
+    if(before && before.modifiedTime===track.modifiedTime && before.size===track.size && before.origin==='embedded tags')return;
+    metaJobs.add(track.id);
+    try{
+      // MP4 metadata can appear after the media data. This first version only
+      // examines the first 1MiB; missing tags fall back to folder and filename.
+      const header=new Uint8Array(await blob.slice(0,1024*1024).arrayBuffer());
+      const tags=metadata.parse(header,track.mimeType,track.name);
+      const merged=metadata.merge(track,before&&before.modifiedTime===track.modifiedTime?before:null,tags);
+      await metadata.put(merged);musicRecords.set(track.id,merged);
+      renderMusicInfo();render();
+      log(`楽曲タグ記録: ${merged.title} (${merged.origin})`);
+    }catch(e){log(`楽曲タグ解析失敗: ${track.title}: ${e.message}`);}
+    finally{metaJobs.delete(track.id);}
   }
   function trimCache(){
     const currentId=queue[index]?.id;
@@ -151,7 +185,7 @@
     if(!upcoming||upcoming.size>25*1024*1024)return;
     void ensureBlob(upcoming).then(()=>{
       if(activeSource==='drive' && queue[index+1]?.id===upcoming.id){
-        log(`次曲の先読み完了: ${upcoming.title}`);
+        if(!prefetchLogged.has(upcoming.id)){prefetchLogged.add(upcoming.id);log(`次曲の先読み完了: ${upcoming.title}`);}
         trimCache();
       }
     }).catch(e=>log(`次曲の先読み失敗: ${e.message}`));
@@ -328,6 +362,7 @@
       el('library-info').textContent=`${result.rootName}：${driveTracks.length}曲 / ${result.folders}フォルダ（対象外ファイル等 ${result.skipped}件）`;
       setMessage(`${result.rootName} 内の ${driveTracks.length}曲を取得しました。Googleドライブを選んで再生できます。`);
       log(`Drive走査成功: ${result.folders}フォルダ / ${driveTracks.length}曲`);
+      renderMusicInfo();
       if(driveTracks.length)switchDrive();
     }catch(e){setMessage(`走査失敗: ${e.message}`,true);log(`Drive走査失敗: ${e.message}`);}
     finally{el('scan-drive').disabled=!drive.hasToken();}
@@ -369,6 +404,7 @@
   el('scan-drive').addEventListener('click',()=>void onScan());
   el('confirm-folder').addEventListener('click',()=>void scanFolder(el('folder-select').value));
   el('filter').addEventListener('input',render);
+  el('music-meta-refresh').addEventListener('click',()=>void loadMusicRecords());
   el('playback-mode').addEventListener('change',()=>{
     const value=el('playback-mode').value;
     if(value===lastPlaybackMode)return;
@@ -393,7 +429,8 @@
   el('folder-id').value=safeGetStorage(savedFolderKey);
   el('queue').replaceChildren();
   render();
-  log('Prototype 0.2.1 起動（Range診断・自動フォールバック）');
+  log('Prototype 0.3.0 起動（楽曲タグ管理の基礎）');
+  void loadMusicRecords();
   if('serviceWorker' in navigator){
     navigator.serviceWorker.addEventListener('message',event=>{
       if(event.data?.type!=='DRIVE_RANGE_DIAGNOSTIC')return;

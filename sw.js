@@ -1,6 +1,6 @@
-// My AI Radio 0.2.1. Page/player media events are intentionally handled in app.js (0.1.2 behavior).
-const CACHE='ai-radio-0.2.1-v1';
-const ASSETS=['./','./index.html','./style.css','./app.js','./drive.js','./manifest.webmanifest','./audio/01-opening.wav','./audio/02-music.wav','./audio/03-ending.wav','./icons/icon-192.png','./icons/icon-512.png'];
+// My AI Radio 0.3.0. Page/player media events are intentionally handled in app.js (0.1.2 behavior).
+const CACHE='ai-radio-0.3.0-v1';
+const ASSETS=['./','./index.html','./style.css','./app.js','./drive.js','./metadata.js','./manifest.webmanifest','./audio/01-opening.wav','./audio/02-music.wav','./audio/03-ending.wav','./icons/icon-192.png','./icons/icon-512.png'];
 let mediaToken=''; // Memory only. Never cache or persist private audio or credentials.
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
