@@ -5,6 +5,8 @@
   const drive = window.RadioDrive;
   const metadata = window.RadioMetadata;
   let musicRecords = new Map();
+  let exclusions = new Set();
+  let catalogRootId = '';
   let metaJobs = new Set();
   const samples = [
     {title:'オープニング（テスト）',kind:'AIトーク相当・短いテスト信号',url:'audio/01-opening.wav',source:'sample'},
@@ -78,8 +80,16 @@
       if(m?.artist){const artist=document.createElement('small');artist.textContent=m.artist+(m.album?' · '+m.album:'');name.append(artist);}
       if(x.path){const small=document.createElement('small');small.textContent=x.path;name.append(small);}
       const btn=document.createElement('button');btn.type='button';btn.textContent='この曲から';
-      btn.addEventListener('click',()=>{playingIntent=true;void activate(i,true);});
-      li.append(num,name,btn);el('queue').append(li);
+      btn.disabled=x.source==='drive' && exclusions.has(x.id);
+      btn.addEventListener('click',()=>{if(x.source==='drive'&&exclusions.has(x.id))return;playingIntent=true;void activate(i,true);});
+      li.append(num,name,btn);
+      if(x.source==='drive'){
+        const ban=document.createElement('button');ban.type='button';
+        ban.className='exclude-toggle';ban.textContent=exclusions.has(x.id)?'除外中・戻す':'選曲から除外';
+        ban.setAttribute('aria-pressed',String(exclusions.has(x.id)));
+        ban.addEventListener('click',()=>void setExcluded(x.id,!exclusions.has(x.id)));
+        li.append(ban);
+      }el('queue').append(li);
     });
     const suffix=shown<matched?`（先頭${shown}曲を表示・検索で絞り込み）`:'';
     el('queue-summary').textContent=term?`検索結果 ${matched}曲 ${suffix}`:`${queue.length}項目 ${suffix}`;
@@ -88,7 +98,7 @@
   function updateMedia(){
     if(!('mediaSession' in navigator)||!queue[index])return;
     try{
-      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.3.0'});
+      navigator.mediaSession.metadata=new MediaMetadata({title:queue[index].title,artist:queue[index].source==='drive'?'My AI Radio / Google Drive':'My AI Radio',album:'Prototype 0.3.1'});
       navigator.mediaSession.playbackState=audio.paused?'paused':'playing';
     }catch(e){log(`MediaSession: ${e.message}`);}
   }
@@ -152,13 +162,34 @@
     catch(e){log(`楽曲タグDBは利用できません: ${e.message}`);}
   }
   function renderMusicInfo(){
-    const analyzed=driveTracks.filter(t=>musicRecords.has(t.id)).length;
-    el('music-meta-status').textContent=`登録 ${driveTracks.length}曲 / タグ情報取得済み ${analyzed}曲（この端末）`;
+    const analyzed=driveTracks.filter(t=>{const r=musicRecords.get(t.id);return !!(r?.tagAnalyzed||r?.analyzedAt);}).length;
+    const all=Array.from(musicRecords.values());
+    const tags=all.filter(x=>x.tagAnalyzed||x.analyzedAt).length;
+    const unavailable=all.filter(x=>x.available===false).length;
+    const current=driveTracks.filter(x=>exclusions.has(x.id)).length;
+    el('music-meta-status').textContent=`端末DB保存済み ${all.length}曲（タグ解析 ${tags}曲） / 今回のDrive一覧 ${driveTracks.length}曲（解析 ${analyzed}曲・除外 ${current}曲） / 利用不可履歴 ${unavailable}曲`;
+    el('music-meta-help').textContent=driveTracks.length?'除外は「再生キュー」の各曲から変更できます。選曲除外は次回以降の曲送り・AI選曲対象に反映されます。':'Googleドライブへ未接続でも保存済み件数を表示します。';
+  }
+  async function loadPreferences(){
+    try{exclusions=new Set((await metadata.getPreferences()).filter(x=>!x.enabled).map(x=>x.id));renderMusicInfo();render();}
+    catch(e){log(`除外設定の読込失敗: ${e.message}`);}
+  }
+  async function setExcluded(id,excluded){
+    try{await metadata.savePreference(id,!excluded);if(excluded)exclusions.add(id);else exclusions.delete(id);
+      renderMusicInfo();render();log(`${excluded?'選曲除外':'選曲対象に復帰'}: ${driveTracks.find(x=>x.id===id)?.title||id}`);
+      if(excluded&&queue[index]?.id===id)log('再生中の曲は止めず、次の曲送りから除外を適用します。');
+    }catch(e){log(`除外設定の保存失敗: ${e.message}`);}
+  }
+  async function reconcileAfterScan(tracks,rootId){
+    const result=await metadata.reconcile(tracks,rootId);
+    await loadMusicRecords();
+    log(`差分同期: 新規${result.added}・変更${result.changed}・利用不可${result.missing}・復帰${result.restored}`);
+    return result;
   }
   async function analyzeTrack(track,blob){
     if(metaJobs.has(track.id))return;
     const before=musicRecords.get(track.id);
-    if(before && before.modifiedTime===track.modifiedTime && before.size===track.size && before.origin==='embedded tags')return;
+    if(before && before.modifiedTime===track.modifiedTime && before.size===track.size && (before.tagAnalyzed||before.analyzedAt))return;
     metaJobs.add(track.id);
     try{
       // MP4 metadata can appear after the media data. This first version only
@@ -166,6 +197,7 @@
       const header=new Uint8Array(await blob.slice(0,1024*1024).arrayBuffer());
       const tags=metadata.parse(header,track.mimeType,track.name);
       const merged=metadata.merge(track,before&&before.modifiedTime===track.modifiedTime?before:null,tags);
+      merged.rootId=before?.rootId||catalogRootId;
       await metadata.put(merged);musicRecords.set(track.id,merged);
       renderMusicInfo();render();
       log(`楽曲タグ記録: ${merged.title} (${merged.origin})`);
@@ -174,17 +206,17 @@
   }
   function trimCache(){
     const currentId=queue[index]?.id;
-    const nextId=queue[index+1]?.id;
+    const nextId=queue.slice(index+1).find(x=>!exclusions.has(x.id))?.id;
     for(const [id,url] of cached.entries()){
       if(id!==currentId && id!==nextId){cached.delete(id);URL.revokeObjectURL(url);}
     }
   }
   function prefetchNext(){
     if(activeSource!=='drive'||el('playback-mode').value!=='compatible')return;
-    const upcoming=queue[index+1];
+    const upcoming=queue.slice(index+1).find(x=>!exclusions.has(x.id));
     if(!upcoming||upcoming.size>25*1024*1024)return;
     void ensureBlob(upcoming).then(()=>{
-      if(activeSource==='drive' && queue[index+1]?.id===upcoming.id){
+      if(activeSource==='drive' && queue.slice(index+1).find(x=>!exclusions.has(x.id))?.id===upcoming.id){
         if(!prefetchLogged.has(upcoming.id)){prefetchLogged.add(upcoming.id);log(`次曲の先読み完了: ${upcoming.title}`);}
         trimCache();
       }
@@ -282,9 +314,11 @@
     if(audio.getAttribute('src')&&!loading){await beginPlay();return;}
     await activate(index,true);
   }
+  function previousPlayable(){let target=index-1;while(target>=0&&queue[target].source==='drive'&&exclusions.has(queue[target].id))target--;return Math.max(0,target);}
   async function next(){
-    if(index+1>=queue.length){playingIntent=false;audio.pause();log('全音源の再生終了');render();return;}
-    await activate(index+1,playingIntent);
+    let target=index+1;while(target<queue.length&&queue[target].source==='drive'&&exclusions.has(queue[target].id))target++;
+    if(target>=queue.length){playingIntent=false;audio.pause();log('全音源の再生終了');render();return;}
+    await activate(target,playingIntent);
   }
   function pause(){
     // Pause does not destroy the currently loaded media; this preserves lock-screen resume.
@@ -355,6 +389,10 @@
     el('scan-drive').disabled=true;
     try{
       const result=await drive.scan(folderId,{onProgress:p=>setMessage(`走査中：${p.folders}フォルダ・${p.tracks}曲、残り${p.remaining}フォルダ`)});
+      // Scan is complete here; only now is it safe to reconcile missing files.
+      catalogRootId=folderId;
+      try{await reconcileAfterScan(result.tracks,folderId);}
+      catch(e){log(`楽曲DB同期失敗（再生機能は継続）: ${e.message}`);}
       driveTracks=result.tracks;
       safeSetStorage(savedFolderKey,folderId);el('folder-id').value=folderId;
       el('drive-mode').disabled=!driveTracks.length;
@@ -369,7 +407,7 @@
   }
   // Player: keep the proven 0.1.2 mediaSession action handlers and single <audio> element.
   el('toggle').addEventListener('click',()=>{if(audio.paused)void play();else pause();});
-  el('prev').addEventListener('click',()=>{playingIntent=true;void activate(Math.max(0,index-1),true);});
+  el('prev').addEventListener('click',()=>{playingIntent=true;void activate(previousPlayable(),true);});
   el('next').addEventListener('click',()=>{playingIntent=true;void next();});
   el('sample').addEventListener('click',setSample);
   el('local').addEventListener('click',()=>el('files').click());
@@ -420,7 +458,7 @@
     const tryAction=(name,fn)=>{try{navigator.mediaSession.setActionHandler(name,fn);}catch{}};
     tryAction('play',()=>{void play();});
     tryAction('pause',()=>{pause();});
-    tryAction('previoustrack',()=>{void activate(Math.max(0,index-1),true);});
+    tryAction('previoustrack',()=>{void activate(previousPlayable(),true);});
     tryAction('nexttrack',()=>{playingIntent=true;void next();});
   }
   el('net').textContent=navigator.onLine?'オンライン':'オフライン';
@@ -429,8 +467,9 @@
   el('folder-id').value=safeGetStorage(savedFolderKey);
   el('queue').replaceChildren();
   render();
-  log('Prototype 0.3.0 起動（楽曲タグ管理の基礎）');
+  log('Prototype 0.3.1 起動（タグ保存・Drive差分同期・除外設定）');
   void loadMusicRecords();
+  void loadPreferences();
   if('serviceWorker' in navigator){
     navigator.serviceWorker.addEventListener('message',event=>{
       if(event.data?.type!=='DRIVE_RANGE_DIAGNOSTIC')return;

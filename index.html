@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
-  <title>My AI Radio | Prototype 0.3.0</title>
+  <title>My AI Radio | Prototype 0.3.1</title>
 </head>
 <body>
 <main class="shell">
@@ -43,11 +43,11 @@
   <div class="stream-choice"><label for="playback-mode">Driveの再生方式：</label><select id="playback-mode"><option value="compatible">互換モード（曲を受信してから再生）</option><option value="range">Range診断モード（失敗時は互換へ復帰）</option></select></div>
   <p class="hint">互換モードは曲全体を受信してから再生します（通信量はファイルサイズ分）。25MB以下の次曲を先読みします。iPhone 15で画面OFF連続再生を確認済み。RangeモードはiPhoneで再生に失敗したため、診断ログを追加しました。失敗した場合は互換モードに自動復帰します。</p>
 </section>
-<section class="panel"><div class="section-title"><h3>楽曲タグ管理（試作）</h3><button id="music-meta-refresh" class="text-btn" type="button">表示更新</button></div><p id="music-meta-status" class="hint">タグ情報を読み込み中…</p><p class="hint">曲を互換モードで再生すると、そのとき受信した音声からタイトル・アーティスト・アルバム等を抽出して、この端末内のIndexedDBに保存します。タグがない場合はフォルダ名・ファイル名で補完します。全曲一括ダウンロードはしません。Driveへの書き込みはありません。</p></section>
+<section class="panel"><div class="section-title"><h3>楽曲タグ管理（試作）</h3><button id="music-meta-refresh" class="text-btn" type="button">表示更新</button></div><p id="music-meta-status" class="hint">タグ情報を読み込み中…</p><p id="music-meta-help" class="hint">Drive未接続でも保存済み件数を表示します。</p><p class="hint">曲を互換モードで再生するとタグを解析し、IndexedDBへ保存します。Google Driveを再走査するとファイルID・更新日時を使って差分を確認します。選曲除外は曲単位で端末に保存されます。Driveの元ファイルは変更・削除しません。</p></section>
 <section class="panel"><div class="section-title"><h3>再生キュー</h3><span id="queue-count">3項目</span></div><label for="filter" class="field-label">曲名・フォルダ名で検索</label><input id="filter" class="field" type="search" placeholder="曲名・アーティスト名"><p id="queue-summary" class="queue-limit"></p><ol id="queue"></ol><p id="library-info" class="hint">Googleドライブの楽曲一覧はまだ取得していません。</p></section>
 <section class="panel"><div class="section-title"><h3>動作ログ</h3><button id="clear" type="button" class="text-btn">ログ消去</button></div><p class="hint">アクセストークンはログに記録しません（曲名とフォルダ名は表示します）。画面OFF中の切り替わりも確認してください。</p><div id="log" role="log" aria-live="polite"></div><button type="button" class="text-btn" id="copy">ログをコピー</button></section>
-<section class="panel small"><h3>今回の開発範囲</h3><p><b>実装済み：</b>サンプル連続再生、Media Session、Google OAuth、フォルダ再帰探索、楽曲一覧、非公開Drive音源の互換再生、認証付きRange実験モード。</p><p><b>今後：</b>Drive側へ保存する楽曲DB、差分同期、選曲除外、GAS定時制作、Gemini連携。</p></section>
-<footer>My AI Radio · Prototype 0.3.0</footer>
+<section class="panel small"><h3>今回の開発範囲</h3><p><b>実装済み：</b>サンプル連続再生、Media Session、Google OAuth、フォルダ再帰探索、楽曲一覧、非公開Drive音源の互換再生、認証付きRange実験モード。</p><p><b>今後：</b>Drive側へのデータ同期、GASによる毎日3時の自動差分走査、Gemini連携。現在の差分照合は手動のDrive再走査時のみです。</p></section>
+<footer>My AI Radio · Prototype 0.3.1</footer>
 </main>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="drive.js" defer></script>

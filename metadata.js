@@ -3,6 +3,7 @@
 'use strict';
 const DB_NAME='ai-radio-music-meta-v1';
 const STORE='tracks';
+const PREFS='preferences';
 const dec=new TextDecoder('utf-8',{fatal:false});
 const latin=new TextDecoder('iso-8859-1');
 const u32=(d,p)=>((d[p]*16777216)+(d[p+1]<<16)+(d[p+2]<<8)+d[p+3])>>>0;
@@ -73,21 +74,46 @@ function parse(bytes,mime,name){
 }
 function open(){return new Promise((resolve,reject)=>{
  if(!global.indexedDB){reject(new Error('このブラウザではIndexedDBを利用できません'));return;}
- const request=indexedDB.open(DB_NAME,1);
- request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});};
+ const request=indexedDB.open(DB_NAME,2);
+ request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains(PREFS))db.createObjectStore(PREFS,{keyPath:'id'});};
  request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error('DB unavailable'));
  });}
 async function getAll(){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readonly'),r=tx.objectStore(STORE).getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close();tx.onerror=()=>{db.close();reject(tx.error);};});}
 async function put(record){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(record);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
 async function removeAll(){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
+async function getPreferences(){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction(PREFS,'readonly');const req=tx.objectStore(PREFS).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);tx.oncomplete=()=>db.close();tx.onerror=()=>{db.close();reject(tx.error);};});}
+async function savePreference(id,enabled){const db=await open();return new Promise((resolve,reject)=>{const tx=db.transaction(PREFS,'readwrite');tx.objectStore(PREFS).put({id,enabled:!!enabled,updatedAt:new Date().toISOString()});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
+// Only call after a fully successful Drive scan; errors must never mark items missing.
+// Old 0.3.0 records without rootId are preserved, never automatically deleted.
+function planReconciliation(previous,tracks,rootId){
+ if(!rootId)throw new Error('rootId required');
+ const prior=new Map(previous.map(r=>[r.id,r]));
+ const present=new Set(tracks.map(t=>t.id));const updates=[];let added=0,changed=0,missing=0,restored=0;
+ const now=new Date().toISOString();
+ for(const t of tracks){const old=prior.get(t.id);if(!old){
+   updates.push({...infer(t),id:t.id,name:t.name,path:t.path,mimeType:t.mimeType,size:t.size,modifiedTime:t.modifiedTime,rootId,available:true,tagAnalyzed:false,origin:'folder / filename',indexedAt:now});added++;
+ }else{
+   const modified=old.modifiedTime!==t.modifiedTime||old.size!==t.size;
+   if(modified)changed++;if(old.available===false)restored++;
+   updates.push({...old,id:t.id,name:t.name,path:t.path,mimeType:t.mimeType,size:t.size,modifiedTime:t.modifiedTime,rootId,available:true,tagAnalyzed:modified?false:!!(old.tagAnalyzed||old.analyzedAt),...(modified?{origin:'folder / filename',title:infer(t).title,artist:infer(t).artist,album:infer(t).album,genre:'',year:'',analyzedAt:null}:{}),indexedAt:now});
+ }}
+ for(const old of previous){if(old.rootId===rootId && old.available!==false && !present.has(old.id)){updates.push({...old,available:false,indexedAt:now});missing++;}}
+ return {updates,stats:{added,changed,missing,restored,total:tracks.length}};
+}
+async function reconcile(tracks,rootId){
+ const previous=await getAll();
+ const {updates,stats}=planReconciliation(previous,tracks,rootId);
+ const db=await open();await new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');const store=tx.objectStore(STORE);for(const rec of updates)store.put(rec);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('transaction aborted'));});db.close();
+ return stats;
+}
 function infer(track){
  const parts=String(track.path||'').split('/').filter(Boolean);
  return {title:track.title||track.name?.replace(/\.[^.]+$/,'')||'不明',artist:parts.length>=2?parts[1]:'',album:parts.length>=3?parts[2]:'',genre:'',year:'',origin:'folder / filename'};
 }
 function merge(track,existing,tags){const fallback=infer(track);
- const result={...fallback,...(existing||{}),...tags,id:track.id,name:track.name,path:track.path,mimeType:track.mimeType,size:track.size,modifiedTime:track.modifiedTime,origin:Object.keys(tags||{}).length?'embedded tags':(existing?.origin||fallback.origin),analyzedAt:new Date().toISOString()};
+ const result={...fallback,...(existing||{}),...tags,id:track.id,name:track.name,path:track.path,mimeType:track.mimeType,size:track.size,modifiedTime:track.modifiedTime,tagAnalyzed:true,available:true,origin:Object.keys(tags||{}).length?'embedded tags':(existing?.origin||fallback.origin),analyzedAt:new Date().toISOString()};
  return result;
 }
-global.RadioMetadata={parse,open,getAll,put,removeAll,infer,merge};
+global.RadioMetadata={parse,open,getAll,put,removeAll,getPreferences,savePreference,reconcile,planReconciliation,infer,merge};
 if(typeof module!=='undefined'&&module.exports)module.exports=global.RadioMetadata;
 })(typeof window!=='undefined'?window:globalThis);
